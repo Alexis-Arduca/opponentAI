@@ -11,6 +11,11 @@ To achieve this, the goal will be to have two opponents fighting each other and 
 
 Since my Zelda game is a 2D project in Unity, I will develop this project under the same conditions.
 
+## Unity Scenes
+
+- PatrolScene : Will just show the **Patrol State** of an enemy.
+- More scene coming later ...
+
 ### Technologies Used
 - Unity (2D Project)
 - C#

@@ -17,6 +17,7 @@ public class Bokoblin : Enemy
         damage = 10;
         detectionRange = 5f;
         attackRange = 1.5f;
+        patrolSpeed = 1.5f;
         retreatDistance = 2f;
         safeDistance = 3f;
         knockbackForce = 2f;
@@ -32,9 +33,16 @@ public class Bokoblin : Enemy
 
     private void UpdateAnimation()
     {
-        if (currentTarget == null) return;
+        Vector2 velocity = Vector2.zero;
 
-        Vector2 velocity = (currentTarget.transform.position - transform.position).normalized;
+        if (currentState == EnemyState.Patrolling)
+        {
+            velocity = patrolDirection;
+        }
+        else if (currentTarget != null)
+        {
+            velocity = (currentTarget.transform.position - transform.position).normalized;
+        }
 
         if (currentState == EnemyState.Chasing || currentState == EnemyState.Patrolling)
         {
@@ -55,6 +63,16 @@ public class Bokoblin : Enemy
         {
             animator.SetBool("IsMoving", false);
         }
+    }
+
+    protected override void IdleBehavior(float distanceToTarget)
+    {
+        base.IdleBehavior(distanceToTarget);
+    }
+
+    protected override void PatrolBehavior(float distanceToTarget)
+    {
+        base.PatrolBehavior(distanceToTarget);
     }
 
     protected override void ChaseBehavior(float distanceToTarget)
@@ -83,7 +101,7 @@ public class Bokoblin : Enemy
 
     private void OnTriggerEnter2D(Collider2D collision)
     {
-        if (collision.CompareTag("EnemyWeapon") || collision.CompareTag("PlayerWeapon"))
+        if (collision.CompareTag("EnemyWeapon"))
         {
             Vector2 knockbackDirection = (transform.position - collision.transform.position).normalized;
             transform.position += (Vector3)knockbackDirection * knockbackForce;

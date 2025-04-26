@@ -20,10 +20,11 @@ public class Enemy : MonoBehaviour
 
     protected float attackTimer;
 
-    private Vector2 patrolPoint;
-    private Vector2 lastDirection;
-    private float patrolPauseTimer;
-    private Vector2[] directions = new Vector2[] { Vector2.up, Vector2.down, Vector2.left, Vector2.right };
+    protected Vector2 patrolDirection;
+    protected Vector2 lastDirection;
+    protected float patrolPauseTimer;
+    protected float patrolMoveTimer;
+    protected Vector2[] directions = new Vector2[] { Vector2.up, Vector2.down, Vector2.left, Vector2.right };
 
     protected Enemy currentTarget;
     private Rigidbody2D rb;
@@ -34,7 +35,7 @@ public class Enemy : MonoBehaviour
         attackTimer = 0;
 
         rb = GetComponent<Rigidbody2D>();
-        SetNewPatrolPoint();
+        SetNewPatrolDirection();
     }
 
     protected virtual void Update()
@@ -88,18 +89,19 @@ public class Enemy : MonoBehaviour
         Destroy(gameObject);
     }
 
+    /// <summary>
+    /// Handle idle state (basically just pass in patrol mode)
+    /// </summary>
+    /// <param name="distanceToTarget"></param>
     protected virtual void IdleBehavior(float distanceToTarget)
     {
-        if (currentTarget != null && distanceToTarget <= detectionRange)
-        {
-            currentState = EnemyState.Chasing;
-        }
-        else
-        {
-            currentState = EnemyState.Patrolling;
-        }
+        currentState = EnemyState.Patrolling;
     }
 
+    /// <summary>
+    /// Handle patrol state until we find an enemy
+    /// </summary>
+    /// <param name="distanceToTarget"></param>
     protected virtual void PatrolBehavior(float distanceToTarget)
     {
         if (patrolPauseTimer > 0)
@@ -108,12 +110,13 @@ public class Enemy : MonoBehaviour
             return;
         }
 
-        transform.position = Vector2.MoveTowards(transform.position, patrolPoint, patrolSpeed * Time.deltaTime);
+        transform.position += (Vector3)(patrolDirection * patrolSpeed * Time.deltaTime);
+        patrolMoveTimer -= Time.deltaTime;
 
-        if (Vector2.Distance(transform.position, patrolPoint) < 0.1f)
+        if (patrolMoveTimer <= 0)
         {
             patrolPauseTimer = patrolPauseDuration;
-            SetNewPatrolPoint();
+            SetNewPatrolDirection();
         }
 
         if (currentTarget != null && distanceToTarget <= detectionRange)
@@ -122,11 +125,31 @@ public class Enemy : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Select randomly a new direction to go for the patrol
+    /// </summary>
+    protected void SetNewPatrolDirection()
+    {
+        Vector2 randomDirection;
+        do
+        {
+            randomDirection = directions[UnityEngine.Random.Range(0, directions.Length)];
+        } while (randomDirection == lastDirection);
+
+        lastDirection = randomDirection;
+        patrolDirection = randomDirection;
+        patrolMoveTimer = UnityEngine.Random.Range(1f, 3f);
+    }
+
+    /// <summary>
+    /// Handle chase state until we are close to the enemy
+    /// </summary>
+    /// <param name="distanceToTarget"></param>
     protected virtual void ChaseBehavior(float distanceToTarget)
     {
         if (currentTarget == null)
         {
-            currentState = EnemyState.Idle;
+            currentState = EnemyState.Patrolling;
             return;
         }
 
@@ -138,11 +161,15 @@ public class Enemy : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Handle fight state until someone is not in range
+    /// </summary>
+    /// <param name="distanceToTarget"></param>
     protected virtual void AttackBehavior(float distanceToTarget)
     {
         if (currentTarget == null)
         {
-            currentState = EnemyState.Idle;
+            currentState = EnemyState.Patrolling;
             return;
         }
 
@@ -158,17 +185,5 @@ public class Enemy : MonoBehaviour
         {
             currentState = EnemyState.Chasing;
         }
-    }
-
-    protected void SetNewPatrolPoint()
-    {
-        Vector2 randomDirection;
-        do
-        {
-            randomDirection = directions[UnityEngine.Random.Range(0, directions.Length)];
-        } while (randomDirection == lastDirection);
-
-        lastDirection = randomDirection;
-        patrolPoint = (Vector2)transform.position + randomDirection * UnityEngine.Random.Range(1f, detectionRange / 2f);
     }
 }
