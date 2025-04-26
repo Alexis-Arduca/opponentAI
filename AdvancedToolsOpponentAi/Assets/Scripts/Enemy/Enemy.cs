@@ -5,9 +5,10 @@ using System.Linq;
 
 public class Enemy : MonoBehaviour
 {
-    public enum EnemyState { Idle, Patrolling, Chasing, Attacking, Frozen }
-    protected EnemyState currentState;
+    public enum EnemyState { Idle, Patrolling, Chasing, Attacking }
+    public enum EnemyAction { Attack, Retreat, Wait, Reposition }
 
+    protected EnemyState currentState;
     public int health;
     public float speed;
     public int damage;
@@ -16,26 +17,38 @@ public class Enemy : MonoBehaviour
     public float patrolSpeed;
     public float attackCooldown;
     public float patrolPauseDuration = 2f;
-    public float freezeDuration = 3f;
 
     protected float attackTimer;
-
     protected Vector2 patrolDirection;
     protected Vector2 lastDirection;
     protected float patrolPauseTimer;
     protected float patrolMoveTimer;
     protected Vector2[] directions = new Vector2[] { Vector2.up, Vector2.down, Vector2.left, Vector2.right };
-
     protected Enemy currentTarget;
     private Rigidbody2D rb;
+
+    protected float decisionCooldown = 1.5f;
+    protected float decisionTimer;
+    protected System.Random random;
+
+    [Header("AI Seed (Optional)")]
+    public int seed = -1; // -1 = random
 
     protected virtual void Start()
     {
         currentState = EnemyState.Idle;
         attackTimer = 0;
-
+        decisionTimer = decisionCooldown;
         rb = GetComponent<Rigidbody2D>();
         SetNewPatrolDirection();
+
+        // Seed Option
+        if (seed == -1) {
+            random = new System.Random(UnityEngine.Random.Range(0, int.MaxValue));
+            Debug.Log("Current Opponent Seed: " + random);
+        } else {
+            random = new System.Random(seed);
+        }
     }
 
     protected virtual void Update()
@@ -76,9 +89,7 @@ public class Enemy : MonoBehaviour
         Debug.Log(name + " took damage: " + damage + ". Remaining health: " + health);
 
         if (health <= 0)
-        {
             Die();
-        }
     }
 
     public event Action OnDeath;
@@ -90,7 +101,7 @@ public class Enemy : MonoBehaviour
     }
 
     /// <summary>
-    /// Handle idle state (basically just pass in patrol mode)
+    /// Handle idle behavior (will just switch to patrol)
     /// </summary>
     /// <param name="distanceToTarget"></param>
     protected virtual void IdleBehavior(float distanceToTarget)
@@ -99,7 +110,7 @@ public class Enemy : MonoBehaviour
     }
 
     /// <summary>
-    /// Handle patrol state until we find an enemy
+    /// Handle patrol behavior until we find an enemy
     /// </summary>
     /// <param name="distanceToTarget"></param>
     protected virtual void PatrolBehavior(float distanceToTarget)
@@ -120,14 +131,9 @@ public class Enemy : MonoBehaviour
         }
 
         if (currentTarget != null && distanceToTarget <= detectionRange)
-        {
             currentState = EnemyState.Chasing;
-        }
     }
 
-    /// <summary>
-    /// Select randomly a new direction to go for the patrol
-    /// </summary>
     protected void SetNewPatrolDirection()
     {
         Vector2 randomDirection;
@@ -142,7 +148,7 @@ public class Enemy : MonoBehaviour
     }
 
     /// <summary>
-    /// Handle chase state until we are close to the enemy
+    /// Handle chase behavior until the enemy leave the range, or be in range for an attack
     /// </summary>
     /// <param name="distanceToTarget"></param>
     protected virtual void ChaseBehavior(float distanceToTarget)
@@ -153,16 +159,22 @@ public class Enemy : MonoBehaviour
             return;
         }
 
-        transform.position = Vector2.MoveTowards(transform.position, currentTarget.transform.position, speed * Time.deltaTime);
-
         if (distanceToTarget <= attackRange)
         {
             currentState = EnemyState.Attacking;
+            return;
+        }
+
+        transform.position = Vector2.MoveTowards(transform.position, currentTarget.transform.position, speed * Time.deltaTime);
+
+        if (distanceToTarget > detectionRange)
+        {
+            currentState = EnemyState.Patrolling;
         }
     }
 
     /// <summary>
-    /// Handle fight state until someone is not in range
+    /// Handle attack behavior
     /// </summary>
     /// <param name="distanceToTarget"></param>
     protected virtual void AttackBehavior(float distanceToTarget)
@@ -182,8 +194,75 @@ public class Enemy : MonoBehaviour
         }
 
         if (distanceToTarget > attackRange)
-        {
             currentState = EnemyState.Chasing;
+    }
+
+    /// <summary>
+    /// Will let the ia choose the next action
+    /// </summary>
+    /// <param name="distanceToTarget"></param>
+    protected virtual void MakeDecision(float distanceToTarget)
+    {
+        decisionTimer -= Time.deltaTime;
+        if (decisionTimer > 0) return;
+
+        decisionTimer = decisionCooldown;
+
+        if (distanceToTarget <= attackRange)
+        {
+            currentState = EnemyState.Attacking;
+            return;
+        }
+
+        EnemyAction action = (EnemyAction)random.Next(0, Enum.GetNames(typeof(EnemyAction)).Length);
+
+        switch (action)
+        {
+            case EnemyAction.Attack:
+                TryAttack(distanceToTarget);
+                break;
+            case EnemyAction.Retreat:
+                Retreat();
+                break;
+            case EnemyAction.Wait:
+                Wait();
+                break;
+            case EnemyAction.Reposition:
+                Reposition();
+                break;
+        }
+    }
+
+
+    protected virtual void TryAttack(float distanceToTarget)
+    {
+        if (distanceToTarget <= attackRange)
+        {
+            currentState = EnemyState.Attacking;
+        }
+    }
+
+    protected virtual void Retreat()
+    {
+        if (currentTarget != null)
+        {
+            Vector2 direction = (transform.position - currentTarget.transform.position).normalized;
+            transform.position += (Vector3)(direction * speed * Time.deltaTime);
+        }
+    }
+
+    protected virtual void Wait()
+    {
+        // Enemy don't move
+    }
+
+    protected virtual void Reposition()
+    {
+        if (currentTarget != null)
+        {
+            Vector2 lateral = Vector2.Perpendicular((currentTarget.transform.position - transform.position).normalized);
+            float side = random.Next(0, 2) == 0 ? 1f : -1f;
+            transform.position += (Vector3)(lateral * side * speed * 0.5f * Time.deltaTime);
         }
     }
 }
