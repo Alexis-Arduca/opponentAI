@@ -1,25 +1,25 @@
 using UnityEngine;
 
+/// <summary>
+/// Bokoblin behavior: enemy with patrol, chase, attack, retreat, and defensive states.
+/// </summary>
 public class Bokoblin : Enemy
 {
-    public Transform swordHitbox;
-    public float knockbackForce = 2f;
-
     private Animator animator;
 
-    /// <summary>
-    /// Initiate enemy statistics (can be change trough the inspector)
-    /// </summary>
     protected override void Start()
     {
         base.Start();
+
         health = 150;
-        speed = 2f;
+        moveSpeed = 2f;
         damage = 10;
         detectionRange = 5f;
-        attackRange = 1.5f;
         patrolSpeed = 1.5f;
-        knockbackForce = 2f;
+        attackSpeed = 3.5f;
+        attackDuration = 0.5f;
+        retreatDistance = 1f;
+        retreatDuration = 0.3f;
 
         animator = GetComponent<Animator>();
     }
@@ -30,70 +30,101 @@ public class Bokoblin : Enemy
         UpdateAnimation();
     }
 
-    /// <summary>
-    /// Handle Everything about sprite animation
-    /// </summary>
     private void UpdateAnimation()
     {
         Vector2 velocity = Vector2.zero;
+        bool isMoving = false;
 
-        if (currentState == EnemyState.Patrolling)
-            velocity = patrolDirection;
-        else if (currentTarget != null)
-            velocity = (currentTarget.transform.position - transform.position).normalized;
+        switch (currentState)
+        {
+            case EnemyState.Patrolling:
+                velocity = patrolDirection;
+                isMoving = true;
+                break;
+            case EnemyState.Chasing:
+            case EnemyState.Attacking:
+            case EnemyState.Defensive:
+                if (currentTarget != null)
+                {
+                    velocity = (currentTarget.position - transform.position).normalized;
+                    isMoving = true;
+                }
+                break;
+            case EnemyState.Retreating:
+                if (currentTarget != null)
+                {
+                    velocity = (transform.position - currentTarget.position).normalized;
+                    isMoving = true;
+                }
+                break;
+        }
 
-        if (currentState == EnemyState.Chasing || currentState == EnemyState.Patrolling)
+        animator.SetBool("IsMoving", isMoving);
+        animator.SetBool("IsRetreating", currentState == EnemyState.Retreating);
+
+        if (isMoving)
         {
             animator.SetFloat("MoveX", velocity.x);
             animator.SetFloat("MoveY", velocity.y);
-            animator.SetBool("IsMoving", true);
 
             if (velocity.x < 0)
+            {
                 transform.localScale = new Vector3(-2, 2, 2);
+            }
             else if (velocity.x > 0)
+            {
                 transform.localScale = new Vector3(2, 2, 2);
-        }
-        else
-        {
-            animator.SetBool("IsMoving", false);
+            }
         }
     }
 
-    /// <summary>
-    /// Override ChaseBehavior to ensure initiative from opponent
-    /// </summary>
-    /// <param name="distanceToTarget"></param>
-    protected override void ChaseBehavior(float distanceToTarget)
+    protected override void HandleIdle()
     {
-        if (currentTarget == null)
-        {
-            currentState = EnemyState.Patrolling;
-            return;
-        }
-
-        if (distanceToTarget <= attackRange)
-        {
-            currentState = EnemyState.Attacking;
-            return;
-        }
-
-        if (distanceToTarget > detectionRange)
-        {
-            currentState = EnemyState.Patrolling;
-        }
-
-        transform.position = Vector2.MoveTowards(transform.position, currentTarget.transform.position, speed * Time.deltaTime);
+        base.HandleIdle();
     }
 
-
-    private void OnTriggerEnter2D(Collider2D collision)
+    protected override void HandlePatrolling()
     {
-        if (collision.CompareTag("EnemyWeapon"))
-        {
-            Vector2 knockbackDirection = (transform.position - collision.transform.position).normalized;
-            transform.position += (Vector3)knockbackDirection * knockbackForce;
+        base.HandlePatrolling();
+    }
 
-            TakeDamage(10);
-        }
+    protected override void UpdateTarget()
+    {
+        base.UpdateTarget();
+    }
+
+    protected override void HandleChasing()
+    {
+        base.HandleChasing();
+    }
+
+    protected override void HandleAttacking()
+    {
+        base.HandleAttacking();
+    }
+
+    protected override void HandleRetreating()
+    {
+        base.HandleRetreating();
+    }
+
+    protected override void HandleDefensive()
+    {
+        base.HandleDefensive();
+    }
+
+    public override void TakeDamage(int damage, Collider2D collision)
+    {
+        base.TakeDamage(damage, collision);
+    }
+
+    protected override void OnCollisionEnter2D(Collision2D collision)
+    {
+        base.OnCollisionEnter2D(collision);
+    }
+
+    protected override void Die()
+    {
+        base.Die();
     }
 }

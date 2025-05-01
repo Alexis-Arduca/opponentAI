@@ -1,95 +1,313 @@
 using UnityEngine;
 using System;
-using System.Collections.Generic;
-using System.Linq;
 
+/// <summary>
+/// Basic enemy logic: patrol, chase, attack, retreat, and die. Damage is handled by the weapon.
+/// </summary>
+[RequireComponent(typeof(Rigidbody2D))]
 public class Enemy : MonoBehaviour
 {
-    public enum EnemyState { Idle, Patrolling, Chasing, Attacking }
-    public enum EnemyAction { Attack, Retreat, Wait, Reposition }
+    public enum EnemyState { Idle, Patrolling, Chasing, Attacking, Retreating, Defensive }
 
-    protected EnemyState currentState;
-    public int health;
-    public float speed;
-    public int damage;
-    public float detectionRange;
-    public float attackRange;
-    public float patrolSpeed;
-    public float attackCooldown;
-    public float patrolPauseDuration = 2f;
+    [Header("Stats")]
+    public int health = 100;
+    public int damage = 5;
+    public float moveSpeed = 2f;
+    public float detectionRange = 5f;
+    public float patrolSpeed = 1.5f;
+    public float patrolChangeInterval = 3f;
+    public float knockbackForce = 2f;
 
+    [Header("Attack Settings")]
+    public float attackRange = 1.5f; // Distance pour déclencher l'attaque
+    public float attackSpeed = 3f;   // Vitesse accrue pendant l'attaque
+    public float attackDuration = 0.5f; // Durée de l'élan d'attaque
+    public float retreatDistance = 1f;  // Distance de recul après l'attaque
+    public float retreatDuration = 0.3f; // Durée du recul
     protected float attackTimer;
-    protected Vector2 patrolDirection;
-    protected Vector2 lastDirection;
+    protected bool isRetreatingAfterAttack;
+
+    [Header("Patrol Settings")]
+    public float patrolPauseDuration = 2f;
     protected float patrolPauseTimer;
     protected float patrolMoveTimer;
-    protected Vector2[] directions = new Vector2[] { Vector2.up, Vector2.down, Vector2.left, Vector2.right };
-    protected Enemy currentTarget;
-    private Rigidbody2D rb;
+    protected Vector2 patrolDirection;
+    protected Vector2 lastPatrolDirection;
 
-    protected float decisionCooldown = 1.5f;
-    protected float decisionTimer;
-    protected System.Random random;
+    [Header("Personality")]
+    [Range(0f, 1f)]
+    public float aggressionLevel = 0.5f;
+    [Range(0f, 1f)]
+    public float courageLevel = 0.5f;
+    [Range(0f, 1f)]
+    public float tacticalLevel = 0.5f;
 
-    [Header("AI Seed (Optional)")]
-    public int seed = -1; // -1 = random
+    protected EnemyState currentState;
+    protected Rigidbody2D rb;
+    protected Transform currentTarget;
+    protected Transform swordHitbox;
+
+    private Vector2[] possibleDirections = new Vector2[] { Vector2.up, Vector2.down, Vector2.left, Vector2.right };
 
     protected virtual void Start()
     {
-        currentState = EnemyState.Idle;
-        attackTimer = 0;
-        decisionTimer = decisionCooldown;
         rb = GetComponent<Rigidbody2D>();
+        currentState = EnemyState.Idle;
         SetNewPatrolDirection();
-
-        // Seed Option
-        if (seed == -1) {
-            random = new System.Random(UnityEngine.Random.Range(0, int.MaxValue));
-            Debug.Log("Current Opponent Seed: " + random);
-        } else {
-            random = new System.Random(seed);
-        }
+        attackTimer = 0f;
+        isRetreatingAfterAttack = false;
     }
 
     protected virtual void Update()
     {
         UpdateTarget();
 
-        float distanceToTarget = currentTarget != null ? Vector2.Distance(transform.position, currentTarget.transform.position) : Mathf.Infinity;
-
         switch (currentState)
         {
             case EnemyState.Idle:
-                IdleBehavior(distanceToTarget);
+                HandleIdle();
                 break;
             case EnemyState.Patrolling:
-                PatrolBehavior(distanceToTarget);
+                HandlePatrolling();
                 break;
             case EnemyState.Chasing:
-                ChaseBehavior(distanceToTarget);
+                HandleChasing();
                 break;
             case EnemyState.Attacking:
-                AttackBehavior(distanceToTarget);
+                HandleAttacking();
+                break;
+            case EnemyState.Retreating:
+                HandleRetreating();
+                break;
+            case EnemyState.Defensive:
+                HandleDefensive();
                 break;
         }
     }
 
     protected virtual void UpdateTarget()
     {
-        Enemy[] allEnemies = FindObjectsOfType<Enemy>();
-        currentTarget = allEnemies
-            .Where(e => e != this && e.health > 0)
-            .OrderBy(e => Vector2.Distance(transform.position, e.transform.position))
-            .FirstOrDefault(e => Vector2.Distance(transform.position, e.transform.position) <= detectionRange);
+        Enemy[] enemies = FindObjectsOfType<Enemy>();
+        float closestDistance = Mathf.Infinity;
+        Transform closestTarget = null;
+
+        foreach (var enemy in enemies)
+        {
+            if (enemy != this && enemy.health > 0)
+            {
+                float distance = Vector2.Distance(transform.position, enemy.transform.position);
+                if (distance < detectionRange && distance < closestDistance)
+                {
+                    closestDistance = distance;
+                    closestTarget = enemy.transform;
+                }
+            }
+        }
+
+        currentTarget = closestTarget;
+
+        if (currentTarget != null)
+        {
+            float healthRatio = (float)health / 100f;
+            float distance = Vector2.Distance(transform.position, currentTarget.position);
+
+            if (healthRatio < 0.3f && courageLevel < 0.4f)
+            {
+                currentState = EnemyState.Retreating;
+            }
+            else if (distance < attackRange && aggressionLevel > 0.6f)
+            {
+                currentState = EnemyState.Attacking;
+            }
+            else if (healthRatio < 0.5f && tacticalLevel > 0.5f)
+            {
+                currentState = EnemyState.Defensive;
+            }
+            else
+            {
+                currentState = EnemyState.Chasing;
+            }
+        }
+        else
+        {
+            currentState = EnemyState.Patrolling;
+        }
     }
 
-    public virtual void TakeDamage(int damage)
+    protected virtual void HandleIdle()
+    {
+        currentState = EnemyState.Patrolling;
+    }
+
+    protected virtual void HandlePatrolling()
+    {
+        if (patrolPauseTimer > 0)
+        {
+            patrolPauseTimer -= Time.deltaTime;
+            rb.velocity = Vector2.zero;
+            return;
+        }
+
+        rb.MovePosition(rb.position + patrolDirection * patrolSpeed * Time.deltaTime);
+        patrolMoveTimer -= Time.deltaTime;
+
+        if (patrolMoveTimer <= 0)
+        {
+            patrolPauseTimer = patrolPauseDuration;
+            SetNewPatrolDirection();
+        }
+    }
+
+    protected virtual void HandleChasing()
+    {
+        if (currentTarget == null)
+        {
+            currentState = EnemyState.Patrolling;
+            return;
+        }
+
+        float distance = Vector2.Distance(transform.position, currentTarget.position);
+        if (distance > detectionRange)
+        {
+            currentTarget = null;
+            currentState = EnemyState.Patrolling;
+            return;
+        }
+
+        Vector2 direction = (currentTarget.position - transform.position).normalized;
+        rb.MovePosition(rb.position + direction * moveSpeed * Time.deltaTime);
+    }
+
+    protected virtual void HandleAttacking()
+    {
+        if (currentTarget == null)
+        {
+            currentState = EnemyState.Patrolling;
+            return;
+        }
+
+        float distance = Vector2.Distance(transform.position, currentTarget.position);
+        if (distance > attackRange && !isRetreatingAfterAttack)
+        {
+            currentState = EnemyState.Chasing;
+            return;
+        }
+
+        attackTimer -= Time.deltaTime;
+
+        if (!isRetreatingAfterAttack)
+        {
+            Vector2 direction = (currentTarget.position - transform.position).normalized;
+            rb.MovePosition(rb.position + direction * attackSpeed * Time.deltaTime);
+
+            if (attackTimer <= 0)
+            {
+                isRetreatingAfterAttack = true;
+                attackTimer = retreatDuration;
+            }
+        }
+        else
+        {
+            Vector2 retreatDirection = (transform.position - currentTarget.position).normalized;
+            rb.MovePosition(rb.position + retreatDirection * moveSpeed * Time.deltaTime);
+
+            if (attackTimer <= 0)
+            {
+                isRetreatingAfterAttack = false;
+                attackTimer = attackDuration;
+                currentState = EnemyState.Chasing;
+            }
+        }
+    }
+
+    protected virtual void HandleRetreating()
+    {
+        if (currentTarget == null)
+        {
+            currentState = EnemyState.Patrolling;
+            return;
+        }
+
+        Vector2 retreatDirection = (transform.position - currentTarget.position).normalized;
+        rb.MovePosition(rb.position + retreatDirection * moveSpeed * 1.2f * Time.deltaTime);
+
+        if ((float)health / 100f > 0.5f)
+        {
+            currentState = EnemyState.Patrolling;
+        }
+    }
+
+    protected virtual void HandleDefensive()
+    {
+        if (currentTarget == null)
+        {
+            currentState = EnemyState.Patrolling;
+            return;
+        }
+
+        float distance = Vector2.Distance(transform.position, currentTarget.position);
+        float safeDistance = 3f;
+        Vector2 direction = (currentTarget.position - transform.position).normalized;
+
+        if (distance < safeDistance)
+        {
+            rb.MovePosition(rb.position - direction * moveSpeed * 0.8f * Time.deltaTime);
+        }
+        else if (distance > safeDistance + 1f)
+        {
+            rb.MovePosition(rb.position + direction * moveSpeed * 0.5f * Time.deltaTime);
+        }
+        else
+        {
+            rb.velocity = Vector2.zero;
+        }
+
+        if ((float)health / 100f > 0.7f && aggressionLevel > 0.5f)
+        {
+            currentState = EnemyState.Chasing;
+        }
+    }
+
+    protected void SetNewPatrolDirection()
+    {
+        Vector2 newDirection;
+        do
+        {
+            newDirection = possibleDirections[UnityEngine.Random.Range(0, possibleDirections.Length)];
+        } while (newDirection == lastPatrolDirection);
+
+        lastPatrolDirection = newDirection;
+        patrolDirection = newDirection;
+        patrolMoveTimer = patrolChangeInterval;
+    }
+
+    public virtual void TakeDamage(int damage, Collider2D collision)
     {
         health -= damage;
         Debug.Log(name + " took damage: " + damage + ". Remaining health: " + health);
 
         if (health <= 0)
+        {
             Die();
+        }
+        else
+        {
+            if (collision != null)
+            {
+                Vector2 knockbackDirection = (transform.position - collision.transform.position).normalized;
+                rb.AddForce(knockbackDirection * knockbackForce, ForceMode2D.Impulse);
+            }
+        }
+    }
+
+    protected virtual void OnCollisionEnter2D(Collision2D collision)
+    {
+        Enemy otherEnemy = collision.collider.GetComponent<Enemy>();
+        if (otherEnemy != null)
+        {
+            Vector2 knockbackDirection = (transform.position - otherEnemy.transform.position).normalized;
+            rb.AddForce(knockbackDirection * knockbackForce * 0.5f, ForceMode2D.Impulse);
+        }
     }
 
     public event Action OnDeath;
@@ -98,171 +316,5 @@ public class Enemy : MonoBehaviour
         Debug.Log(name + " died!");
         OnDeath?.Invoke();
         Destroy(gameObject);
-    }
-
-    /// <summary>
-    /// Handle idle behavior (will just switch to patrol)
-    /// </summary>
-    /// <param name="distanceToTarget"></param>
-    protected virtual void IdleBehavior(float distanceToTarget)
-    {
-        currentState = EnemyState.Patrolling;
-    }
-
-    /// <summary>
-    /// Handle patrol behavior until we find an enemy
-    /// </summary>
-    /// <param name="distanceToTarget"></param>
-    protected virtual void PatrolBehavior(float distanceToTarget)
-    {
-        if (patrolPauseTimer > 0)
-        {
-            patrolPauseTimer -= Time.deltaTime;
-            return;
-        }
-
-        transform.position += (Vector3)(patrolDirection * patrolSpeed * Time.deltaTime);
-        patrolMoveTimer -= Time.deltaTime;
-
-        if (patrolMoveTimer <= 0)
-        {
-            patrolPauseTimer = patrolPauseDuration;
-            SetNewPatrolDirection();
-        }
-
-        if (currentTarget != null && distanceToTarget <= detectionRange)
-            currentState = EnemyState.Chasing;
-    }
-
-    protected void SetNewPatrolDirection()
-    {
-        Vector2 randomDirection;
-        do
-        {
-            randomDirection = directions[UnityEngine.Random.Range(0, directions.Length)];
-        } while (randomDirection == lastDirection);
-
-        lastDirection = randomDirection;
-        patrolDirection = randomDirection;
-        patrolMoveTimer = UnityEngine.Random.Range(1f, 3f);
-    }
-
-    /// <summary>
-    /// Handle chase behavior until the enemy leave the range, or be in range for an attack
-    /// </summary>
-    /// <param name="distanceToTarget"></param>
-    protected virtual void ChaseBehavior(float distanceToTarget)
-    {
-        if (currentTarget == null)
-        {
-            currentState = EnemyState.Patrolling;
-            return;
-        }
-
-        if (distanceToTarget <= attackRange)
-        {
-            currentState = EnemyState.Attacking;
-            return;
-        }
-
-        transform.position = Vector2.MoveTowards(transform.position, currentTarget.transform.position, speed * Time.deltaTime);
-
-        if (distanceToTarget > detectionRange)
-        {
-            currentState = EnemyState.Patrolling;
-        }
-    }
-
-    /// <summary>
-    /// Handle attack behavior
-    /// </summary>
-    /// <param name="distanceToTarget"></param>
-    protected virtual void AttackBehavior(float distanceToTarget)
-    {
-        if (currentTarget == null)
-        {
-            currentState = EnemyState.Patrolling;
-            return;
-        }
-
-        attackTimer -= Time.deltaTime;
-        if (attackTimer <= 0)
-        {
-            attackTimer = attackCooldown;
-            currentTarget.TakeDamage(damage);
-            Debug.Log(name + " attacked " + currentTarget.name);
-        }
-
-        if (distanceToTarget > attackRange)
-            currentState = EnemyState.Chasing;
-    }
-
-    /// <summary>
-    /// Will let the ia choose the next action
-    /// </summary>
-    /// <param name="distanceToTarget"></param>
-    protected virtual void MakeDecision(float distanceToTarget)
-    {
-        decisionTimer -= Time.deltaTime;
-        if (decisionTimer > 0) return;
-
-        decisionTimer = decisionCooldown;
-
-        if (distanceToTarget <= attackRange)
-        {
-            currentState = EnemyState.Attacking;
-            return;
-        }
-
-        EnemyAction action = (EnemyAction)random.Next(0, Enum.GetNames(typeof(EnemyAction)).Length);
-
-        switch (action)
-        {
-            case EnemyAction.Attack:
-                TryAttack(distanceToTarget);
-                break;
-            case EnemyAction.Retreat:
-                Retreat();
-                break;
-            case EnemyAction.Wait:
-                Wait();
-                break;
-            case EnemyAction.Reposition:
-                Reposition();
-                break;
-        }
-    }
-
-
-    protected virtual void TryAttack(float distanceToTarget)
-    {
-        if (distanceToTarget <= attackRange)
-        {
-            currentState = EnemyState.Attacking;
-        }
-    }
-
-    protected virtual void Retreat()
-    {
-        if (currentTarget != null)
-        {
-            Vector2 direction = (transform.position - currentTarget.transform.position).normalized;
-            transform.position += (Vector3)(direction * speed * Time.deltaTime);
-        }
-    }
-
-    protected virtual void Wait()
-    {
-        // Enemy don't move
-    }
-
-    protected virtual void Reposition()
-    {
-        if (currentTarget != null)
-        {
-            Vector2 lateral = Vector2.Perpendicular((currentTarget.transform.position - transform.position).normalized);
-            float side = random.Next(0, 2) == 0 ? 1f : -1f;
-            transform.position += (Vector3)(lateral * side * speed * 0.5f * Time.deltaTime);
-        }
     }
 }
