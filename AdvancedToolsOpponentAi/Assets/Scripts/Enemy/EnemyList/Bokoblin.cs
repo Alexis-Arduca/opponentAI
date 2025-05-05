@@ -20,6 +20,9 @@ public class Bokoblin : Enemy
         attackDuration = 0.5f;
         retreatDistance = 1f;
         retreatDuration = 0.3f;
+        aggressionLevel = 0.7f;
+        courageLevel = 0.6f;
+        tacticalLevel = 0.4f;
 
         animator = GetComponent<Animator>();
     }

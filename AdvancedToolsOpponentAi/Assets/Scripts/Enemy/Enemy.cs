@@ -19,11 +19,11 @@ public class Enemy : MonoBehaviour
     public float knockbackForce = 2f;
 
     [Header("Attack Settings")]
-    public float attackRange = 1.5f; // Distance pour déclencher l'attaque
-    public float attackSpeed = 3f;   // Vitesse accrue pendant l'attaque
-    public float attackDuration = 0.5f; // Durée de l'élan d'attaque
-    public float retreatDistance = 1f;  // Distance de recul après l'attaque
-    public float retreatDuration = 0.3f; // Durée du recul
+    public float attackRange = 1.5f;
+    public float attackSpeed = 3f;
+    public float attackDuration = 0.5f;
+    public float retreatDistance = 1f;
+    public float retreatDuration = 0.3f;
     protected float attackTimer;
     protected bool isRetreatingAfterAttack;
 
@@ -42,6 +42,14 @@ public class Enemy : MonoBehaviour
     [Range(0f, 1f)]
     public float tacticalLevel = 0.5f;
 
+    [Header("State Time Tracking")]
+    protected float timeInIdle;
+    protected float timeInPatrolling;
+    protected float timeInChasing;
+    protected float timeInAttacking;
+    protected float timeInRetreating;
+    protected float timeInDefensive;
+
     protected EnemyState currentState;
     protected Rigidbody2D rb;
     protected Transform currentTarget;
@@ -56,10 +64,39 @@ public class Enemy : MonoBehaviour
         SetNewPatrolDirection();
         attackTimer = 0f;
         isRetreatingAfterAttack = false;
+
+        timeInIdle = 0f;
+        timeInPatrolling = 0f;
+        timeInChasing = 0f;
+        timeInAttacking = 0f;
+        timeInRetreating = 0f;
+        timeInDefensive = 0f;
     }
 
     protected virtual void Update()
     {
+        switch (currentState)
+        {
+            case EnemyState.Idle:
+                timeInIdle += Time.deltaTime;
+                break;
+            case EnemyState.Patrolling:
+                timeInPatrolling += Time.deltaTime;
+                break;
+            case EnemyState.Chasing:
+                timeInChasing += Time.deltaTime;
+                break;
+            case EnemyState.Attacking:
+                timeInAttacking += Time.deltaTime;
+                break;
+            case EnemyState.Retreating:
+                timeInRetreating += Time.deltaTime;
+                break;
+            case EnemyState.Defensive:
+                timeInDefensive += Time.deltaTime;
+                break;
+        }
+
         UpdateTarget();
 
         switch (currentState)
@@ -314,6 +351,15 @@ public class Enemy : MonoBehaviour
     protected virtual void Die()
     {
         Debug.Log(name + " died!");
+        
+        Debug.Log($"{name} Time Spent in States:");
+        Debug.Log($"Idle: {timeInIdle:F2} seconds");
+        Debug.Log($"Patrolling: {timeInPatrolling:F2} seconds");
+        Debug.Log($"Chasing: {timeInChasing:F2} seconds");
+        Debug.Log($"Attacking: {timeInAttacking:F2} seconds");
+        Debug.Log($"Retreating: {timeInRetreating:F2} seconds");
+        Debug.Log($"Defensive: {timeInDefensive:F2} seconds");
+
         OnDeath?.Invoke();
         Destroy(gameObject);
     }
