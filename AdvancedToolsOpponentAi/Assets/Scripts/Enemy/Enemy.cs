@@ -1,290 +1,211 @@
 using UnityEngine;
-using System;
+using TMPro;
 
 /// <summary>
-/// Basic enemy logic: patrol, chase, attack, retreat, and die. Damage is handled by the weapon.
+/// Base enemy AI with probabilistic decision-making for attack and defense.
 /// </summary>
 [RequireComponent(typeof(Rigidbody2D))]
 public class Enemy : MonoBehaviour
 {
-    public enum EnemyState { Idle, Patrolling, Chasing, Attacking, Retreating, Defensive }
+    public enum State { Patrolling, Chasing, Attacking, Defensive }
 
     [Header("Stats")]
-    public int health = 100;
-    public int damage = 5;
-    public float moveSpeed = 2f;
-    public float detectionRange = 5f;
-    public float patrolSpeed = 1.5f;
-    public float patrolChangeInterval = 3f;
-    public float knockbackForce = 2f;
-
-    [Header("Attack Settings")]
-    public float attackRange = 1.5f;
-    public float attackSpeed = 3f;
-    public float attackDuration = 0.5f;
-    public float retreatDistance = 1f;
-    public float retreatDuration = 0.3f;
-    protected float attackTimer;
-    protected bool isRetreatingAfterAttack;
-
-    [Header("Patrol Settings")]
-    public float patrolPauseDuration = 2f;
-    protected float patrolPauseTimer;
-    protected float patrolMoveTimer;
-    protected Vector2 patrolDirection;
-    protected Vector2 lastPatrolDirection;
+    [SerializeField] protected int health = 100;
+    [SerializeField] public int damage = 5;
+    [SerializeField] protected float moveSpeed = 2f;
+    [SerializeField] protected float detectionRange = 5f;
+    [SerializeField] protected float attackRange = 1.5f;
+    [SerializeField] protected float safeDistance = 3f;
 
     [Header("Personality")]
-    [Range(0f, 1f)]
-    public float aggressionLevel = 0.5f;
-    [Range(0f, 1f)]
-    public float courageLevel = 0.5f;
-    [Range(0f, 1f)]
-    public float tacticalLevel = 0.5f;
+    [Range(0f, 1f)] [SerializeField] protected float aggressionLevel = 0.5f;
+    [Range(0f, 1f)] [SerializeField] protected float courageLevel = 0.5f;
+    [Range(0f, 1f)] [SerializeField] protected float tacticalLevel = 0.5f;
+
+    [Header("Decision")]
+    [SerializeField] protected float decisionInterval = 1.5f;
+    protected float decisionTimer;
+
+    [Header("Patrol")]
+    [SerializeField] protected float patrolSpeed = 1.5f;
+    [SerializeField] protected float patrolChangeInterval = 3f;
+    protected float patrolTimer;
+    protected Vector2 patrolDirection;
+
+    [Header("UI")]
+    [SerializeField] protected TextMeshProUGUI statsText;
 
     [Header("State Time Tracking")]
-    protected float timeInIdle;
     protected float timeInPatrolling;
     protected float timeInChasing;
     protected float timeInAttacking;
-    protected float timeInRetreating;
     protected float timeInDefensive;
 
-    protected EnemyState currentState;
+    protected State currentState;
     protected Rigidbody2D rb;
-    protected Transform currentTarget;
-    protected Transform swordHitbox;
-
-    private Vector2[] possibleDirections = new Vector2[] { Vector2.up, Vector2.down, Vector2.left, Vector2.right };
+    protected Transform target;
+    private static readonly Vector2[] directions = { Vector2.up, Vector2.down, Vector2.left, Vector2.right };
 
     protected virtual void Start()
     {
         rb = GetComponent<Rigidbody2D>();
-        currentState = EnemyState.Idle;
+        currentState = State.Patrolling;
+        decisionTimer = decisionInterval;
+        patrolTimer = patrolChangeInterval;
         SetNewPatrolDirection();
-        attackTimer = 0f;
-        isRetreatingAfterAttack = false;
 
-        timeInIdle = 0f;
-        timeInPatrolling = 0f;
-        timeInChasing = 0f;
-        timeInAttacking = 0f;
-        timeInRetreating = 0f;
-        timeInDefensive = 0f;
+        if (statsText == null)
+        {
+            statsText = GameObject.Find("EnemyStatsText")?.GetComponent<TextMeshProUGUI>();
+        }
     }
 
     protected virtual void Update()
     {
         switch (currentState)
         {
-            case EnemyState.Idle:
-                timeInIdle += Time.deltaTime;
-                break;
-            case EnemyState.Patrolling:
-                timeInPatrolling += Time.deltaTime;
-                break;
-            case EnemyState.Chasing:
-                timeInChasing += Time.deltaTime;
-                break;
-            case EnemyState.Attacking:
-                timeInAttacking += Time.deltaTime;
-                break;
-            case EnemyState.Retreating:
-                timeInRetreating += Time.deltaTime;
-                break;
-            case EnemyState.Defensive:
-                timeInDefensive += Time.deltaTime;
-                break;
+            case State.Patrolling: timeInPatrolling += Time.deltaTime; break;
+            case State.Chasing: timeInChasing += Time.deltaTime; break;
+            case State.Attacking: timeInAttacking += Time.deltaTime; break;
+            case State.Defensive: timeInDefensive += Time.deltaTime; break;
         }
 
-        UpdateTarget();
+        UpdateStatsDisplay();
+
+        decisionTimer -= Time.deltaTime;
+        if (decisionTimer <= 0f)
+        {
+            DecideState();
+            decisionTimer = decisionInterval;
+        }
 
         switch (currentState)
         {
-            case EnemyState.Idle:
-                HandleIdle();
-                break;
-            case EnemyState.Patrolling:
-                HandlePatrolling();
-                break;
-            case EnemyState.Chasing:
-                HandleChasing();
-                break;
-            case EnemyState.Attacking:
-                HandleAttacking();
-                break;
-            case EnemyState.Retreating:
-                HandleRetreating();
-                break;
-            case EnemyState.Defensive:
-                HandleDefensive();
-                break;
+            case State.Patrolling: HandlePatrolling(); break;
+            case State.Chasing: HandleChasing(); break;
+            case State.Attacking: HandleAttacking(); break;
+            case State.Defensive: HandleDefensive(); break;
         }
     }
 
-    protected virtual void UpdateTarget()
+    protected virtual void UpdateStatsDisplay()
     {
+        if (statsText != null)
+        {
+            statsText.text = $"{name} Stats\n" +
+                             $"Health: {health}\n" +
+                             $"Patrolling: {timeInPatrolling:F2} s\n" +
+                             $"Chasing: {timeInChasing:F2} s\n" +
+                             $"Attacking: {timeInAttacking:F2} s\n" +
+                             $"Defensive: {timeInDefensive:F2} s";
+        }
+    }
+
+    protected virtual void DecideState()
+    {
+        target = null;
         Enemy[] enemies = FindObjectsOfType<Enemy>();
-        float closestDistance = Mathf.Infinity;
-        Transform closestTarget = null;
+        float closestDistance = detectionRange;
 
         foreach (var enemy in enemies)
         {
             if (enemy != this && enemy.health > 0)
             {
-                float distance = Vector2.Distance(transform.position, enemy.transform.position);
-                if (distance < detectionRange && distance < closestDistance)
+                float distances = Vector2.Distance(transform.position, enemy.transform.position);
+                if (distances < closestDistance)
                 {
-                    closestDistance = distance;
-                    closestTarget = enemy.transform;
+                    closestDistance = distances;
+                    target = enemy.transform;
                 }
             }
         }
 
-        currentTarget = closestTarget;
-
-        if (currentTarget != null)
+        if (target == null)
         {
-            float healthRatio = (float)health / 100f;
-            float distance = Vector2.Distance(transform.position, currentTarget.position);
+            currentState = State.Patrolling;
+            return;
+        }
 
-            if (healthRatio < 0.3f && courageLevel < 0.4f)
-            {
-                currentState = EnemyState.Retreating;
-            }
-            else if (distance < attackRange && aggressionLevel > 0.6f)
-            {
-                currentState = EnemyState.Attacking;
-            }
-            else if (healthRatio < 0.5f && tacticalLevel > 0.5f)
-            {
-                currentState = EnemyState.Defensive;
-            }
-            else
-            {
-                currentState = EnemyState.Chasing;
-            }
+        float healthRatio = (float)health / 100f;
+        float distance = Vector2.Distance(transform.position, target.position);
+
+        float retreatChance = (1f - courageLevel) * (1f - healthRatio);
+        if (Random.value < retreatChance && healthRatio < 0.3f)
+        {
+            currentState = State.Defensive;
+            return;
+        }
+
+        if (distance < attackRange)
+        {
+            float attackChance = aggressionLevel * healthRatio * (1f - 0.5f * tacticalLevel);
+            float defensiveChance = tacticalLevel + (1f - aggressionLevel) * (1f - healthRatio);
+
+            float total = attackChance + defensiveChance;
+            attackChance /= total;
+            defensiveChance /= total;
+
+            currentState = Random.value < attackChance ? State.Attacking : State.Defensive;
         }
         else
         {
-            currentState = EnemyState.Patrolling;
-        }
-    }
+            float chaseChance = aggressionLevel * healthRatio;
+            float defensiveChance = tacticalLevel + (1f - aggressionLevel) * (1f - healthRatio);
 
-    protected virtual void HandleIdle()
-    {
-        currentState = EnemyState.Patrolling;
+            float total = chaseChance + defensiveChance;
+            chaseChance /= total;
+            defensiveChance /= total;
+
+            currentState = Random.value < chaseChance ? State.Chasing : State.Defensive;
+        }
     }
 
     protected virtual void HandlePatrolling()
     {
-        if (patrolPauseTimer > 0)
-        {
-            patrolPauseTimer -= Time.deltaTime;
-            rb.velocity = Vector2.zero;
-            return;
-        }
-
         rb.MovePosition(rb.position + patrolDirection * patrolSpeed * Time.deltaTime);
-        patrolMoveTimer -= Time.deltaTime;
+        patrolTimer -= Time.deltaTime;
 
-        if (patrolMoveTimer <= 0)
+        if (patrolTimer <= 0)
         {
-            patrolPauseTimer = patrolPauseDuration;
             SetNewPatrolDirection();
+            patrolTimer = patrolChangeInterval;
         }
     }
 
     protected virtual void HandleChasing()
     {
-        if (currentTarget == null)
+        if (target == null || Vector2.Distance(transform.position, target.position) > detectionRange)
         {
-            currentState = EnemyState.Patrolling;
+            currentState = State.Patrolling;
             return;
         }
 
-        float distance = Vector2.Distance(transform.position, currentTarget.position);
-        if (distance > detectionRange)
-        {
-            currentTarget = null;
-            currentState = EnemyState.Patrolling;
-            return;
-        }
-
-        Vector2 direction = (currentTarget.position - transform.position).normalized;
+        Vector2 direction = (target.position - transform.position).normalized;
         rb.MovePosition(rb.position + direction * moveSpeed * Time.deltaTime);
     }
 
     protected virtual void HandleAttacking()
     {
-        if (currentTarget == null)
+        if (target == null || Vector2.Distance(transform.position, target.position) > attackRange)
         {
-            currentState = EnemyState.Patrolling;
+            currentState = State.Chasing;
             return;
         }
 
-        float distance = Vector2.Distance(transform.position, currentTarget.position);
-        if (distance > attackRange && !isRetreatingAfterAttack)
-        {
-            currentState = EnemyState.Chasing;
-            return;
-        }
-
-        attackTimer -= Time.deltaTime;
-
-        if (!isRetreatingAfterAttack)
-        {
-            Vector2 direction = (currentTarget.position - transform.position).normalized;
-            rb.MovePosition(rb.position + direction * attackSpeed * Time.deltaTime);
-
-            if (attackTimer <= 0)
-            {
-                isRetreatingAfterAttack = true;
-                attackTimer = retreatDuration;
-            }
-        }
-        else
-        {
-            Vector2 retreatDirection = (transform.position - currentTarget.position).normalized;
-            rb.MovePosition(rb.position + retreatDirection * moveSpeed * Time.deltaTime);
-
-            if (attackTimer <= 0)
-            {
-                isRetreatingAfterAttack = false;
-                attackTimer = attackDuration;
-                currentState = EnemyState.Chasing;
-            }
-        }
-    }
-
-    protected virtual void HandleRetreating()
-    {
-        if (currentTarget == null)
-        {
-            currentState = EnemyState.Patrolling;
-            return;
-        }
-
-        Vector2 retreatDirection = (transform.position - currentTarget.position).normalized;
-        rb.MovePosition(rb.position + retreatDirection * moveSpeed * 1.2f * Time.deltaTime);
-
-        if ((float)health / 100f > 0.5f)
-        {
-            currentState = EnemyState.Patrolling;
-        }
+        Vector2 direction = (target.position - transform.position).normalized;
+        rb.MovePosition(rb.position + direction * moveSpeed * 1.5f * Time.deltaTime);
     }
 
     protected virtual void HandleDefensive()
     {
-        if (currentTarget == null)
+        if (target == null)
         {
-            currentState = EnemyState.Patrolling;
+            currentState = State.Patrolling;
             return;
         }
 
-        float distance = Vector2.Distance(transform.position, currentTarget.position);
-        float safeDistance = 3f;
-        Vector2 direction = (currentTarget.position - transform.position).normalized;
+        float distance = Vector2.Distance(transform.position, target.position);
+        Vector2 direction = (target.position - transform.position).normalized;
 
         if (distance < safeDistance)
         {
@@ -298,69 +219,21 @@ public class Enemy : MonoBehaviour
         {
             rb.velocity = Vector2.zero;
         }
-
-        if ((float)health / 100f > 0.7f && aggressionLevel > 0.5f)
-        {
-            currentState = EnemyState.Chasing;
-        }
     }
 
     protected void SetNewPatrolDirection()
     {
-        Vector2 newDirection;
-        do
-        {
-            newDirection = possibleDirections[UnityEngine.Random.Range(0, possibleDirections.Length)];
-        } while (newDirection == lastPatrolDirection);
-
-        lastPatrolDirection = newDirection;
-        patrolDirection = newDirection;
-        patrolMoveTimer = patrolChangeInterval;
+        patrolDirection = directions[Random.Range(0, directions.Length)];
     }
 
     public virtual void TakeDamage(int damage, Collider2D collision)
     {
         health -= damage;
-        Debug.Log(name + " took damage: " + damage + ". Remaining health: " + health);
-
+        Debug.Log($"{name} took {damage} damage. Health: {health}");
         if (health <= 0)
         {
-            Die();
+            Debug.Log($"{name} died!");
+            Destroy(gameObject);
         }
-        else
-        {
-            if (collision != null)
-            {
-                Vector2 knockbackDirection = (transform.position - collision.transform.position).normalized;
-                rb.AddForce(knockbackDirection * knockbackForce, ForceMode2D.Impulse);
-            }
-        }
-    }
-
-    protected virtual void OnCollisionEnter2D(Collision2D collision)
-    {
-        Enemy otherEnemy = collision.collider.GetComponent<Enemy>();
-        if (otherEnemy != null)
-        {
-            Vector2 knockbackDirection = (transform.position - otherEnemy.transform.position).normalized;
-            rb.AddForce(knockbackDirection * knockbackForce * 0.5f, ForceMode2D.Impulse);
-        }
-    }
-
-    public event Action OnDeath;
-    protected virtual void Die()
-    {
-        Debug.Log(name + " died!");
-        
-        Debug.Log($"{name} Time Spent in States:");
-        Debug.Log($"Idle: {timeInIdle:F2} seconds");
-        Debug.Log($"Patrolling: {timeInPatrolling:F2} seconds");
-        Debug.Log($"Chasing: {timeInChasing:F2} seconds");
-        Debug.Log($"Attacking: {timeInAttacking:F2} seconds");
-        Debug.Log($"Retreating: {timeInRetreating:F2} seconds");
-        Debug.Log($"Defensive: {timeInDefensive:F2} seconds");
-
-        OnDeath?.Invoke();
-        Destroy(gameObject);
     }
 }
