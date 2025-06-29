@@ -10,8 +10,8 @@ public class EnemyWeapon : MonoBehaviour
             Enemy parentEnemy = GetComponentInParent<Enemy>();
             if (enemyHit != null && parentEnemy != null && enemyHit != parentEnemy)
             {
-                enemyHit.TakeDamage(parentEnemy.damage, collision);
-                Debug.Log(parentEnemy.name + " hit " + enemyHit.name + " for " + parentEnemy.damage + " damage.");
+                enemyHit.TakeDamage(parentEnemy.damage, parentEnemy);
+                Debug.Log($"{parentEnemy.name} hit {enemyHit.name} for {parentEnemy.damage} damage.");
             }
         }
     }

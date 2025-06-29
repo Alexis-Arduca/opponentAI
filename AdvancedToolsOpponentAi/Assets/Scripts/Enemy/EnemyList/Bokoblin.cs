@@ -11,14 +11,15 @@ public class Bokoblin : Enemy
     {
         base.Start();
 
-        health = 150;
-        damage = 10;
-        moveSpeed = 2f;
-        detectionRange = 5f;
-        attackRange = 1.5f;
-        safeDistance = 3f;
-        patrolSpeed = 1.5f;
-        decisionInterval = 1.2f;
+        // maxHealth = 150;
+        // currentHealth = maxHealth;
+        // damage = 10;
+        // moveSpeed = 5f;
+        // detectionRange = 5f;
+        // attackRange = 1.5f;
+        // safeDistance = 2f;
+        // patrolSpeed = 5f;
+        // decisionInterval = 1f;
         animator = GetComponent<Animator>();
     }
 
@@ -48,12 +49,16 @@ public class Bokoblin : Enemy
                     isMoving = true;
                 }
                 break;
+            case State.Stunned:
+                isMoving = false;
+                break;
         }
 
         if (animator != null)
         {
             animator.SetBool("IsMoving", isMoving);
             animator.SetBool("IsAttacking", currentState == State.Attacking);
+            animator.SetBool("IsStunned", currentState == State.Stunned);
             if (isMoving)
             {
                 animator.SetFloat("MoveX", velocity.x);
@@ -76,11 +81,14 @@ public class Bokoblin : Enemy
         if (statsText != null)
         {
             statsText.text = $"Bokoblin {name} Stats\n" +
-                             $"Health: {health}\n" +
+                             $"Health: {currentHealth}/{maxHealth}\n" +
+                             $"State: {currentState}\n" +
                              $"Patrolling: {timeInPatrolling:F2} s\n" +
                              $"Chasing: {timeInChasing:F2} s\n" +
                              $"Attacking: {timeInAttacking:F2} s\n" +
-                             $"Defensive: {timeInDefensive:F2} s";
+                             $"Defensive: {timeInDefensive:F2} s\n" +
+                             $"Recovering: {timeInRecovering:F2} s\n" +
+                             $"Stunned: {timeInStunned:F2} s";
         }
     }
 }
